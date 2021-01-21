@@ -1,31 +1,46 @@
-//элементы командной строки вида:
-//input.txt encrypt.txt decrypt.txt 4(сдвиг) 16(размер блока)
-
 #include <iostream>
 #include <string>
 #include <fstream>
 #include <vector>
-#include <ctime>
 
 using namespace std;
 
+//Ввод вида
+//C:\Users\...\source\repos\...\...\input.txt C:\Users\...\source\repos\...\...\encrypt.txt 4 16 228 encrypt
+//C:\Users\...\source\repos\...\...\encrypt.txt C:\Users\...\source\repos\...\...\decrypt.txt 4 16 228 decrypt
+
 struct Block { //стркутура блок
-    string block; //строковый блок
     unsigned char g_block[16]; //значения каждого байта блока, используем 1байтовый беззнаковый тип
-    void clear() { //очистка
-        block.clear();
-        for (auto& i : g_block) {
+    Block() {
+        for (unsigned char &i : g_block) {
             i = 0;
         }
+    }
+    int true_size() const {
+        int count = 0;
+        for (auto i : g_block) {
+            if (i != 0) {
+                ++count;
+            }
+        }
+        return count;
+    }
+    string make_str() const {
+        string result;
+        for (auto i : g_block) {
+            result.push_back(i);
+        }
+        return result;
+    }
+    int size() const {
+        return sizeof(g_block);
     }
 };
 
 Block operator^(const Block& first, const Block& second) {
     Block new_block;
-    int size = first.block.size();
-    for (int i = 0; i < size; ++i) {
-        new_block.block.push_back(static_cast<unsigned char>(first.block[i]) ^ static_cast<unsigned char>(second.block[i]));  //ксорим каждый соответствующий символ
-        new_block.g_block[i] = new_block.block[i]; //записываем новое значение
+    for (int i = 0; i < new_block.size(); ++i) {
+        new_block.g_block[i] = first.g_block[i] ^ second.g_block[i]; //записываем новое значение
     }
     return new_block;
 }
@@ -41,9 +56,6 @@ Block operator>> (Block block, unsigned int size) {
         new_block.g_block[i] |= lost_bits[i - 1]; //то, что мы теряем переходит в другой байт правее
     }
     new_block.g_block[0] |= lost_bits[15]; //потери последнего байта идут в первый, так так кольцевой сдвиг
-    for (unsigned char i : new_block.g_block) {
-        new_block.block.push_back(static_cast<unsigned char>(i));
-    }
     return new_block;
 }
 
@@ -58,151 +70,117 @@ Block operator<< (Block block, unsigned int size) { //аналогично сд�
         new_block.g_block[i] |= lost_bits[i + 1];
     }
     new_block.g_block[15] |= lost_bits[0];
-    for (unsigned char i : new_block.g_block) {
-        new_block.block.push_back(static_cast<unsigned char>(i));
-    }
     return new_block;
 }
 
-void fill_blocks(vector<Block>& vec, unsigned int size) { //заполнение заглушкой
-    unsigned int add_space = (size - vec[vec.size() - 1].block.length() % size) % size;
+void fill_blocks(vector<Block>& vec) { //заполнение заглушкой
     auto random_char = static_cast<unsigned char>(rand()%128);
-    for (int i = 0; i < add_space; ++i) {
-        vec[vec.size() - 1].block += random_char;
+    for (int i = vec[vec.size() - 1].true_size(); i < vec[vec.size() - 1].size(); ++i) {
+        vec[vec.size() - 1].g_block[i] = random_char;
     }
 }
 
-void create_gamma(unsigned int size, Block& gamma) { //создаем гамму
-    unsigned char random;
-    string str_gamma;
-    for (int i = 0; i < size; ++i) {
-        random = rand() % 94 + 33;  //псевдорандомные "хорошие" символы
-        gamma.g_block[i] = random;
-        str_gamma += random;
+void create_gamma(Block& gamma) { //создаем гамму
+    for (auto& i : gamma.g_block) {
+        i = rand() % 94 + 33;  //псевдорандомные "хорошие" символы
     }
-    gamma.block = str_gamma;
 }
 
 int main(int argc, char *argv[]) {
-    if (argc > 6) {
+    if (argc > 7) {
         cout << "Set correct arguments of command line!";
         return -1;
     }
     string input_file = argv[1];
-    string encrypt_file = argv[2];
-    string decrypt_file = argv[3];
-    unsigned int shift = stoi(argv[4]);
-    unsigned int size_of_block = stoi(argv[5]);
+    string output_file = argv[2];
+    unsigned int shift = stoi(argv[3]);
+    unsigned int size_of_block = stoi(argv[4]);
+    int VI = stoi(argv[5]);
+    string mode = argv[6];
     vector<Block> vec_of_blocks;
 
     ifstream input(input_file, ios::binary);
+    ofstream output(output_file);
     if (!input) {
         cerr << "File is not open!\n";
         return -1;
     }
 
-    srand(time(nullptr));
-
-    const int VI = rand();  //получаем вектор инициализации
-
     string plaintext;
     plaintext.resize(size_of_block);
+    int count_blocks = 0;  //запоминаю, чтобы в последующем избавиться от мусора
     while (!input.eof()) {
         input.read(plaintext.data(), size_of_block);         // считываю блоки
-        plaintext = plaintext.substr(0, input.gcount());
-        for (char& i : plaintext) {
-            i = static_cast<unsigned char>(i);
+        Block new_block;
+        count_blocks += input.gcount();
+        for (int i = 0; i < input.gcount(); ++i) {
+            new_block.g_block[i] = plaintext[i];
         }
-        Block new_block = {plaintext};
         vec_of_blocks.push_back(new_block);
     }
     input.close();
+    count_blocks /= size_of_block;
 
-    int count_blocks = vec_of_blocks.size();  //запоминаю, чтобы в последующем исбавиться от мусора
+    if (mode == "encrypt") {
 
-    srand(VI); // секретное число
+        srand(VI); // секретное число
 
-    fill_blocks(vec_of_blocks, size_of_block); // используем заглушку
+        fill_blocks(vec_of_blocks); // используем заглушку
 
-    for (Block& i : vec_of_blocks) {
-        for (int j = 0; j < size_of_block; ++j) {
-            i.g_block[j] = static_cast<unsigned char>(i.block[j]);  //пихаем байты в массив с байтами
+        Block MyGamma;
+
+        for (Block &i : vec_of_blocks) {
+            create_gamma(MyGamma); // создаем две части гаммы
+            i = i ^ MyGamma;  //ксорим
         }
-    }
 
-    Block MyGamma;
-
-    for (Block& i : vec_of_blocks) {
-        create_gamma(size_of_block, MyGamma); // создаем две части гаммы
-        i = i ^ MyGamma;  //ксорим
-    }
-
-    for (Block& i : vec_of_blocks) {
-        i = i << shift;  //сдвигаем
-    }
-
-    ofstream encrypt(encrypt_file);
-
-    for (const Block i : vec_of_blocks) {
-        encrypt << i.block; //выводим в файл шифротекст
-    }
-    encrypt.close();
-
-
-//Decrypting...
-
-    ofstream decrypt(decrypt_file);
-
-    ifstream encrypt_in(encrypt_file, ios::binary);
-
-    srand(VI);
-
-    auto decrypt_char = static_cast<unsigned char>(rand()%128);  //получаю старую заглушку
-
-    vector<Block> de_blocks;
-
-    plaintext.resize(size_of_block);
-
-    while (!encrypt_in.eof()) {
-        encrypt_in.read(plaintext.data(), size_of_block);         // считываю блоки из шифротекста
-        for (char& i : plaintext) {
-            i = static_cast<unsigned char>(i);
+        for (Block &i : vec_of_blocks) {
+            i = i << shift;  //сдвигаем
         }
-        Block new_block = {plaintext};
-        de_blocks.push_back(new_block);
-    }
-    encrypt_in.close();
 
-    for (Block& i : de_blocks) {
-        for (int j = 0; j < size_of_block; ++j) {
-            i.g_block[j] = static_cast<unsigned char>(i.block[j]); //пихаю байты
+        for (const Block& block : vec_of_blocks) {
+            output << block.make_str(); //выводим в файл шифротекст
         }
-    }
+        output.close();
 
-    for (Block& i : de_blocks) {
-        i = i >> shift; //делаю обратный сдвиг
-    }
+    } else if (mode == "decrypt"){
 
-    MyGamma.clear();
+        //Decrypting...
 
-    for (Block& i : de_blocks) {
-        create_gamma(size_of_block, MyGamma); // создаем две части гаммы
-        i = i ^ MyGamma;  //ксорим
-    }
+        srand(VI); // секретное число
 
-    for (int i = 0; i < size_of_block; ++i) { //избавляюсь от заглушки
-        if (de_blocks[count_blocks - 1].g_block[i] == decrypt_char) {
-            de_blocks[count_blocks - 1].block.erase(i, size_of_block - i + 1);
-            break;
+        auto decrypt_char = static_cast<unsigned char>(rand() % 128);  //получаю старую заглушку
+
+        for (Block &i : vec_of_blocks) {
+            i = i >> shift; //делаю обратный сдвиг
         }
+
+        Block MyGamma;
+
+        for (Block &i : vec_of_blocks) {
+            create_gamma(MyGamma); // создаем две части гаммы
+            i = i ^ MyGamma;  //ксорим
+        }
+
+        Block tmp = vec_of_blocks[count_blocks - 1];
+
+        string str_tmp = tmp.make_str();
+
+        for (int i = 0; i < size_of_block; ++i) { //избавляюсь от заглушки
+            if (str_tmp[i] == decrypt_char) {
+                str_tmp.erase(i, str_tmp.size() - i + 1);
+                break;
+            }
+        }
+
+        output << "Decrypted:" << endl;
+
+        for (int i = 0; i < count_blocks - 1; ++i) { //вывожу без мусора
+            output << vec_of_blocks[i].make_str();
+        }
+        output << str_tmp;
+
+        output.close();
     }
-
-    decrypt << "Decrypted:" << endl;
-
-    for (int i = 0; i < count_blocks; ++i) { //вывожу без мусора
-        decrypt << de_blocks[i].block;
-    }
-
-    decrypt.close();
     return 0;
 }
